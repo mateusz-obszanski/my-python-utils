@@ -1,4 +1,3 @@
-from abc import ABC
 from typing import (
     Any,
     Callable,
@@ -6,167 +5,195 @@ from typing import (
     Mapping,
     NoReturn,
     Optional,
+    Sequence,
     TypeVar,
     Union,
-    overload,
 )
-from ..types.predicates import is_callable, is_iterable, is_mapping
-
+from itertools import repeat, zip_longest
+from time import sleep
 
 _In = TypeVar("_In")
 _Out = TypeVar("_Out")
 _PredIn = TypeVar("_PredIn")
 
-Pred = Union[bool, Callable[[_Out, _PredIn], bool]]
+Pred = Union[bool, Callable[..., bool]]
+
+_Args = Sequence
+_KWArgs = Mapping[str, Any]
 
 
-class KWArgsError(ABC, ValueError):
-    pass
-
-
-class NotMappingError(KWArgsError):
+class ArgumentTypeError(ValueError):
     """
-    KWArgs are not a `Mapping`.
-    """
-
-
-class KeysNotStrError(KWArgsError):
-    """
-    Not all kwargs' keys are strings.
+    Wrong type of the predicate - accepted: `bool`, `Callable`
     """
 
 
-class PredicateError(ABC, ValueError):
-    pass
-
-
-class PredicateTypeError(PredicateError):
+class InvalidValueError(ValueError):
     """
-    Wrong type of the predicate - accepted: `bool`, `Callable`.
+    Argument set to value that is not considered valid
     """
 
 
-class PredicateNotMappingError(PredicateError, KWArgsError):
-    pass
+class UnsizableSequenceError(ValueError):
+    """
+    Possibly infinite sequence
+    """
 
 
-class PredicateKeysNotStrError(PredicateError, KeysNotStrError):
-    pass
-
-
-__expected_mapping_error_msg_fmt = "`{kwargs_name}` must be a `Mapping`, got `{type}`"
-__keys_not_str_error_msg_fmt = "all `{kwargs_name}` keys must be `str`, got `{type}`"
-
-
-def run_forever(f: Callable[..., Any], *args, **kwargs) -> NoReturn:
+def run_forever(
+    f: Callable, args: Optional[Sequence] = None, kwargs: Optional[Mapping[str, Any]] = None
+) -> NoReturn:
     """
     Protip
     ------
     `f` can be a callable object with stete set to previous output (`None` initially)
-    in order to compute values based on previous output.
+    in order to compute values based on previous output
     """
+    if args is None:
+        if kwargs is None:
+            while True:
+                f()
+
+        while True:
+            f(**kwargs)
+
+    if kwargs is None:
+        while True:
+            f(*args)
+
     while True:
         f(*args, **kwargs)
 
 
-def __check_args_kwargs_and_run(
-    f: Callable[[_In], _Out],
-    args_name: str = "args",
-    kwargs_name: str = "kwargs",
-    *args: _In,
-    **kwargs: _In,
-) -> _Out:
+def run_for_args_and_kwargs_sequence(
+    f: Callable[..., _Out],
+    args_gen: Iterable,
+    kwargs_gen: Optional[Iterable[Mapping[str, Any]]] = None,
+    until_longer: bool = False,
+    fill_value: Optional[Any] = None,
+    return_option: str = "all",
+) -> Union[_Out, list[_Out], None, NoReturn]:
     """
-    `args_name` and `kwargs_name` are keys to look for in `**kwargs` containing `f`'s args and
-    kwargs.
+    Runs until the shorter of `args_gen` and `kwargs_gen`
+    iterators is exhausted.
+    Returns the last `f`'s output
+
+    Parameters
+    ----------
+    - `f: Callable`,
+    - `args_gen: Iterable` - `f`'s args generator for every iteration,
+    - `kwargs_gen: Iterable[Mapping[str, Any]] | None` - optional `f`'s
+        kwargs generator for every iteration.
+    - `until_longer: bool = False` - if `True`, runs until the longer iterator is exhausted
+    - `fill_value: Any | None = None` - ignored if `until_longer == False`. Fill value for the shorter iterator
+    - `return_option: str = "all"` - `"discard" | "last" | "all"`
 
     Raises
     ------
-    - `NotMappingError`(`KWArgsError` (`ValueError`)) - `f`'s kwargs are not a `Mapping`,
-    - `KeysNotStrError`(`KWArgsError` (`ValueError`)) - not all `f`'s kwargs' keys are `str`
+    `InvalidValueError`(`ValueError`) if `return_option`'s value is not valid
+
+    Protip
+    ------
+    `itertools.repeat` can be used as `args_gen` and `kwargs_gen` for infinite loop
     """
-    f_args = kwargs.get(args_name, args)
-    if not is_iterable(f_args):
-        f_args = (f_args,)
 
-    f_kwargs = kwargs.get(kwargs_name, {})
-    if not is_mapping(f_kwargs):
-        raise NotMappingError(
-            __expected_mapping_error_msg_fmt.format(
-                kwargs_name=kwargs_name, type=str(type(f_kwargs))
-            )
-        )
+    if kwargs_gen is None:
+        kwargs_gen = repeat({})
 
-    non_str_key = next((key for key in f_kwargs.keys() if not isinstance(key, str)), None)  # type: ignore
-    if not non_str_key:
-        raise KeysNotStrError(
-            __keys_not_str_error_msg_fmt.format(
-                kwargs_name=kwargs_name, type=str(type(f_kwargs))
-            )
-        )
-    return f(*f_args, **f_kwargs)  # type: ignore
+    args_and_kwargs_gen = (
+        zip_longest(args_gen, kwargs_gen, fillvalue=fill_value)
+        if until_longer
+        else zip(args_gen, kwargs_gen)
+    )
+
+    if return_option == "all":
+        return [f(*args, **kwargs) for args, kwargs in args_and_kwargs_gen]
+
+    if return_option == "discard":
+        for args, kwargs in args_and_kwargs_gen:
+            f(*args, **kwargs)
+
+        return
+
+    if return_option == "last":
+        result = None
+        for args, kwargs in args_and_kwargs_gen:
+            result = f(*args, **kwargs)
+
+        return result
+
+    raise InvalidValueError(
+        f"""`return_option`'s valid values are: "discard" | "last" | "all", got "{return_option}\""""
+    )
 
 
-@overload
 def run_if(
-    f: Callable[[_In], _Out], pred: Pred, *args: _In, **kwargs: _In
-) -> Union[_Out, None]:
-    ...
-
-
-@overload
-def run_if(
-    f: Callable[[_In], _Out],
+    f: Callable[..., _Out],
     pred: Pred,
-    args: Optional[Iterable[_In]] = None,
+    args: Iterable[_In] = (),
     kwargs: Optional[Mapping[str, _In]] = None,
-    pred_args: Optional[Iterable[_PredIn]] = None,
-    pred_kwargs: Optional[Mapping[str, _PredIn]] = None,
+    pred_args: Iterable[_PredIn] = (),
+    pred_kwargs: Mapping[str, _PredIn] = {},
 ) -> Union[_Out, None]:
-    ...
-
-
-def run_if(f: Callable[..., _Out], pred, *args, **kwargs) -> Union[_Out, None]:
     """
     Parameters
     ----------
     - `f: Callable`,
-    - `pred: bool | Callable` - if `Callable`, `pred_args` or `pred_kwargs` can be used,
-    - `pred_args`,
-    - `pred_kwargs`,
-    - `f`'s args can be provided as `*args` or by keyword: `args=...`,
-    - `f`s kwargs can be provided as `**kwargs` or by keyword: `kwargs=...`
+    - `pred: bool | Callable` - predicate. If `Callable`, `pred_args` or `pred_kwargs` can be used,
+    - `args: Iterable | None` - `f`'s args,
+    - `kwargs: Mapping[str, Any] | None` - `f`'s kwargs,
+    - `pred_args: Iterable | None` - `pred`'s args,
+    - `pred_kwargs: Mapping[str, Any] | None` - `pred`'s kwargs
+
+    Returns
+    -------
+    `f`s output
 
     Raises
     ------
-    - `NotMappingError`(`KWArgsError`(`ValueError`)) - `f`'s kwargs are not a `Mapping`,
-    - `KeysNotStrError`(`KWArgsError`(`ValueError`)) - not all `f`'s kwargs' keys are `str`,
-    - `PredicateTypeError`(`PredicateError`(`ValueError`)) - `pred` is neither `bool` nor `Callable`,
-    - `PredicateNotMappingError`(`PredicateError`(`ValueError`), `KWArgsError`) - `pred_kwargs` is not a `Mapping`,
-    - `PredicateKeysNotStrError`(`PredicateError`(`ValueError`), KeysNotSetError) - not all `pred_kwargs`' keys are `str`
+    `ArgumentTypeError`(`ValueError`) if `pred` is neither `bool` nor `Callable`
     """
+    if kwargs is None:
+        kwargs = {}
+
     if isinstance(pred, bool):
         if pred:
-            return __check_args_kwargs_and_run(f, *args, **kwargs)
-    if is_callable(pred):
-        try:
-            pred_val = __check_args_kwargs_and_run(
-                pred, *args, args_name="pred_args", kwargs_name="pred_kwargs", **kwargs  # type: ignore
-            )
-
-        except KWArgsError as e:
-            raise PredicateNotMappingError(*e.args) from e
-
-        except KeysNotStrError as e:
-            raise PredicateKeysNotStrError(*e.args) from e
-
-        if pred_val:
-            return __check_args_kwargs_and_run(f, *args, **kwargs)
+            return f(*args, **kwargs)
 
         return
 
-    raise PredicateTypeError(f"`pred` must be `bool` or `Callable`, got `{type(pred)}`")
+    if callable(pred):
+        pred_val: bool = pred(*pred_args, **pred_kwargs)
+        if pred_val:
+            return f(*args, **kwargs)
+
+        return
+
+    raise ArgumentTypeError(
+        f"`pred` must be instance of either`bool` or `Callable`, got `{type(pred)}`"
+    )
 
 
-def loop_if():
-    pass
+def loop_if(
+    f: Callable[[_Args, _KWArgs], _Out],
+    pred: Callable[[_Out], tuple[bool, _Args, _KWArgs]],
+    interval: float = 1.0,
+) -> NoReturn:
+    """
+    Executes `f` every time when `pred` returns `True` every `interval` seconds.
+
+    Parameters
+    ----------
+    - `f: Callable[[_Args, _KWArgs], _Out]`,
+    - `pred: Callable[[_Out], tuple[bool, _Args, _KWArgs]]` - predicate, takes `f`'s output as argument
+        (`None` for the first time) must return `tuple[bool, _Args, _KWArgs]` - `bool` determines whether
+        `f` will be called with `_Args` arguments and `_KWArgs` keyword arguments,
+    - `interval: float = 1.0` - time interval of loop repetition [s]
+    """
+    prev_out = None
+    while True:
+        call, args, kwargs = pred(prev_out)
+        if call:
+            prev_out = f(*args, **kwargs)
+
+        sleep(interval)
