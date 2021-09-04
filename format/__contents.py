@@ -1,33 +1,29 @@
+# -*- coding: utf-8 -*-
+
 from typing import (
-    Any as __Any,
-    Union as __Union,
-    Callable as __Callable,
-    Mapping as __Mapping,
-    overload as __overload,
+    Any as _Any,
+    Callable as _Callable,
+    Mapping as _Mapping,
+    Literal as _Literal,
+    Union as _Union,
+    Iterable as _Iterable,
+    TypedDict as _TypedDict,
+    Optional as _Optional,
+    overload as _overload,
 )
-import re as __re
-from common.exceptions.messages import value_error_positional_msg as __value_error_positional_msg
-from common.format import _pluralize
+import re as _re
+from itertools import chain as _chain
+import sys as _sys
 
 
-pluralize = _pluralize
+def __name_of_caller(nest_lvl: int = 0) -> str:
+    """
+    Returns caller's name
+    """
+    return _sys._getframe(nest_lvl + 1).f_code.co_name
 
 
-@__overload
-def stringify_kwargs(kwargs: __Mapping[str, __Any]) -> str:
-    ...
-
-
-@__overload
-def stringify_kwargs(**kwargs) -> str:
-    ...
-
-
-def stringify_kwargs(*args: __Mapping[str, __Any], **kwargs) -> str:
-    if args and kwargs:
-        raise ValueError(
-            __value_error_positional_msg(f_name=stringify_kwargs.__name__, expected_n=0, args=args)
-        )
+def stringified_kwargs(kwargs: _Mapping[str, _Any], /) -> str:
     try:
         return ", ".join(f"{key}={val}" for key, val in kwargs.items())
     except AttributeError:
@@ -35,7 +31,7 @@ def stringify_kwargs(*args: __Mapping[str, __Any], **kwargs) -> str:
         return ", ".join(f"{key}={kwargs[key]}" for key in kwargs.keys())
 
 
-def replace_many(string: str, mapping: __Mapping[str, str], ignore_case: bool = False) -> str:
+def replace_many(string: str, /, mapping: _Mapping[str, str], *, ignore_case: bool = False) -> str:
     """
     Given a string and a replacement map, it returns the replaced string.
 
@@ -52,203 +48,259 @@ def replace_many(string: str, mapping: __Mapping[str, str], ignore_case: bool = 
     Source of the original code: https://gist.github.com/bgusach/a967e0587d6e01e889fd1d776c5f3729
     """
     if not mapping:
-        # Edge case that'd produce a funny regex and cause a KeyError
         return string
 
-    # If case insensitive, we need to normalize the old string so that later a replacement
-    # can be found. For instance with {"HEY": "lol"} we should match and find a replacement for
-    # "hey", HEY", "hEy", etc.
     if ignore_case:
-        normalize: __Callable[[str], str] = lambda s: s.lower()
-        re_mode = __re.IGNORECASE
+        normalize: _Callable[[str], str] = lambda s: s.lower()
+        re_mode = _re.IGNORECASE
+
+        mapping = {normalize(key): val for key, val in mapping.items()}
 
     else:
-        normalize: __Callable[[str], str] = lambda s: s
+        normalize: _Callable[[str], str] = lambda s: s
         re_mode = 0
-
-    mapping = {normalize(key): val for key, val in mapping.items()}
 
     # Place longer ones first to keep shorter substrings from matching where the longer ones should
     # take place. For instance given the replacements {'ab': 'AB', 'abc': 'ABC'} against the string
     # 'hey abc', it should produce 'hey ABC' and not 'hey ABc'
     rep_sorted = sorted(mapping, key=len, reverse=True)
-    rep_escaped = map(__re.escape, rep_sorted)
+    rep_escaped = map(_re.escape, rep_sorted)
 
     # Create a big OR regex that matches any of the substrings to replace
-    pattern = __re.compile("|".join(rep_escaped), re_mode)  # type: ignore
+    pattern = _re.compile("|".join(rep_escaped), re_mode)  # type: ignore
 
-    # For each match, look up the new string in the replacements, being the key the normalized old
-    # string
     return pattern.sub(lambda match: mapping[normalize(match.group(0))], string)
 
 
-def __format_partial_handle_value_error(
-    match: __Union[__re.Match, None], fmt: str, val: str, e: ValueError
-):
-    keyword = (match.groupdict().get("keyword", None) or "") if match is not None else ""
-    specifier = "{" f"{keyword}:{fmt}" "}"
-    raise FormatError(f"Invalid format specifier: `{specifier}` for value `{val}`") from e
+def capitalized_first_letter_str(s: str, /) -> str:
+    return s[0].upper() + s[1:] if s else ""
 
 
-def format_partial_kwargs(
-    string: str, kwargs: __Mapping[str, __Any], raise_nonexistent_keywords: bool = False
-) -> str:
-    group_fmt = r"(?P<fmt>[^}]*)"
-    group_fmt_optional = f"(:{group_fmt})?"
-
-    re_compile = __re.compile
-
-    for keyword, value in kwargs.items():
-        keyword_pattern = re_compile(f"{{{keyword}{group_fmt_optional}}}")
-
-        if raise_nonexistent_keywords:
-            matches = list(keyword_pattern.finditer(string))
-            if not matches:
-                raise KeyError(keyword)
-
-        else:
-            matches = keyword_pattern.finditer(string)
-
-        for match in matches:
-            fmt = match.groupdict()["fmt"]
-            if fmt is None:
-                optional_fmt_with_suffix = ""
-                repl = str(value)
-            else:
-                optional_fmt_with_suffix = f":{fmt}" if fmt else ""
-                try:
-                    repl = f"{{:{fmt}}}".format(value)
-                except ValueError as e:
-                    __format_partial_handle_value_error(match, fmt, value, e)
-
-            string = string.replace(f"{{{keyword}{optional_fmt_with_suffix}}}", repl, 1)
-
-    return string
+Case = _Literal["camel", "snake", "kebab"]
+Sep = _Union[str, None]
 
 
-def format_partial(
+class _SepMapping(_TypedDict):
+    camel: None
+    snake: str
+    kebab: str
+
+
+_SEP_MAPPING: _SepMapping = {
+    "camel": None,
+    "snake": "_",
+    "kebab": "-",
+}
+
+
+@_overload
+def converted_case(
     string: str,
-    args: tuple = (),
-    kwargs: __Mapping[str, __Any] = {},
-    ordered_ph_no_overflow: bool = True,
-    raise_nonexistent_keywords: bool = False,
+    /,
+    old_case: Case,
+    new_case: Case,
+    *,
+    capitalize_first: bool = False,
 ) -> str:
-    """
-    Partial string substitution. supported placeholders: {}, {<number>} and {<keyword>}.
+    ...
 
-    ordered_ph_no_overflow - if False and str has numerical placeholder, i.e. {4} >= len(args), raises
-    IndexError, else decrements all not replaced numerical placeholders
 
-    raise_nonexistent_keywords - if True and nonexistent keyword in kwargs, raises KeyError
-    """
-    # TODO no trailing : with empty fmt
-    # TODO debug - format_partial("{3}-{1:.2f}", args=[1, 3.145, 7]) == '3.15-{1:.2f}'
+@_overload
+def converted_case(
+    string: str,
+    /,
+    old_sep: Sep,
+    new_sep: Sep,
+    *,
+    capitalize_first: bool = False,
+) -> str:
+    ...
+
+
+@_overload
+def converted_case(
+    string: str,
+    old_case_or_sep: _Union[Case, Sep],
+    new_case_or_sep: _Union[Case, Sep],
+    /,
+    *,
+    capitalize_first: bool = False,
+) -> str:
+    ...
+
+
+def converted_case(
+    string: str,
+    /,
+    *args: _Union[Case, Sep],
+    capitalize_first: bool = False,
+    **kwargs: _Union[Case, Sep],
+) -> str:
     if not string:
-        if not ordered_ph_no_overflow or ordered_ph_no_overflow and not args and not kwargs:
-            msg = __value_error_positional_msg(
-                format_partial.__name__, expected_n="at least one", args=args
-            )
-            raise ValueError(f"empty string - {msg}")
-
         return ""
 
-    if not args and not kwargs:
-        raise ValueError(
-            __value_error_positional_msg(
-                format_partial.__name__, expected_n="at least one", args=args
+    if len(args) + len(kwargs) > 2:
+        raise ValueError(f"{__name_of_caller()} expects 2 arguments, got: {len(args) + len(kwargs)}")
+
+    wrong_kw = next(
+        (kw for kw in kwargs if kw not in {"old_case", "new_case", "old_sep", "new_sep"}), None
+    )
+    if wrong_kw is not None:
+        raise ValueError(f"Unexpected keyword: {wrong_kw}")
+
+    if "old_case" in kwargs:
+        old_case = kwargs["old_case"]
+        old_sep = _SEP_MAPPING[old_case] if old_case is not None else None
+    elif "old_sep" in kwargs:
+        old_sep = kwargs["old_sep"]
+    elif args:
+        old_case_or_sep = args[0]
+        if old_case_or_sep is None:
+            old_sep = None
+        else:
+            old_sep = (
+                _SEP_MAPPING[old_case_or_sep]
+                if old_case_or_sep in _SEP_MAPPING
+                else old_case_or_sep
             )
+    else:
+        raise ValueError(f"{__name_of_caller()} expects `old_sep` or 'old_case' argument")
+
+    if "new_case" in kwargs:
+        new_case = kwargs["new_case"]
+        new_sep = _SEP_MAPPING[new_case] if new_case is not None else None
+    elif "new_sep" in kwargs:
+        new_sep = kwargs["new_sep"]
+    elif len(args) == 2:
+        new_case_or_sep = args[1]
+        if new_case_or_sep is None:
+            new_sep = None
+        else:
+            new_sep = _SEP_MAPPING.get(new_case_or_sep, new_case_or_sep)
+    else:
+        raise ValueError(f"{__name_of_caller()} expects `new_sep` or `new_case` argument")
+
+    subgroups: _Iterable[str]
+
+    # from camelCase
+    if old_sep is None:
+        # to camelCase
+        if new_sep is None:
+            return string
+
+        camelcase_group_pattern = _re.compile(r"(^[^A-Z]+|[A-Z_]+(?![^A-Z])|[A-Z][^A-Z_]+)")
+        subgroups = (m.group(0).lower() for m in camelcase_group_pattern.finditer(string))
+
+    else:
+        subgroups = (sg for sg in string.split(old_sep))
+
+    # to camelCase
+    if new_sep is None:
+        if capitalize_first:
+            return "".join(sg[0].upper() + sg[1:] if sg else "" for sg in subgroups)
+
+        first_subgroup = next(subgroups)
+        return "".join(
+            _chain([first_subgroup], (sg[0].upper() + sg[1:] if sg else "" for sg in subgroups))
         )
 
-    re_compile = __re.compile
-
-    # i.e. "...{1}...{0}..."
-    #           ^     ^
-    keyword_numeric = r"\d+"
-
-    group_keyword_numeric = rf"(?P<keyword>{keyword_numeric})"
-    # i.e. "...{:<.2f}..."
-    #            ^^^^
-    group_fmt = r"(?P<fmt>[^}]*)"
-
-    # i.e. "...{:<.2f}..."
-    #           ^^^^^
-    group_fmt_optional = f"(:{group_fmt})?"
-
-    # placeholder patterns
-    _ph_pattern_template = r"{" "%s" f"{group_fmt_optional}" r"}"
-
-    ph_pattern_empty = re_compile(_ph_pattern_template % "")
-    ph_pattern_keyword_numeric = re_compile(_ph_pattern_template % group_keyword_numeric)
-
-    # order of substitution matters
-    # {foo:...} -> {4:...} -> {:...}
-
-    # replace keyword placeholders
-    string = format_partial_kwargs(
-        string, kwargs, raise_nonexistent_keywords=raise_nonexistent_keywords
-    )
-
-    args_used_indices: set[int] = set()
-    ns_to_decrement: set[int] = set()
-
-    # replace ordered
-    for arg_match_numeric in ph_pattern_keyword_numeric.finditer(string):
-        groupdict = arg_match_numeric.groupdict()
-        arg_index = int(groupdict["keyword"])
-        fmt = groupdict["fmt"] or ""
-
-        try:
-            arg = args[arg_index]
-        except IndexError as e:
-            if not ordered_ph_no_overflow:
-                raise IndexError(
-                    f"Replacement index {arg_index} out of range for positional args tuple"
-                ) from e
-
-            ns_to_decrement.add(arg_index)
-            continue
-
-        try:
-            string = ph_pattern_keyword_numeric.sub(f"{{:{fmt}}}".format(arg), string, count=1)
-        except ValueError as e:
-            __format_partial_handle_value_error(arg_match_numeric, fmt, arg, e)
-
-        args_used_indices.add(arg_index)
-
-    # decrement leftover numeric placeholders
-    if ordered_ph_no_overflow and ns_to_decrement:
-        args_len = len(args)
-        for n in sorted(ns_to_decrement):
-            n_pattern = re_compile(f"{{{n}{group_fmt_optional}}}")
-            # replace all (fmts differ)
-            for match in n_pattern.finditer(string):
-                match = next(n_pattern.finditer(string))
-                groupdict = match.groupdict()
-                fmt = groupdict["fmt"] or ""
-
-                string = ph_pattern_keyword_numeric.sub(
-                    f"{{{n - args_len}:{fmt}}}", string, count=1
-                )
-
-    # replace any empty placeholder
-    index_not_used: __Callable[[int], bool] = lambda i: i not in args_used_indices
-
-    for arg_index, arg_match in zip(
-        filter(index_not_used, range(len(args))),
-        ph_pattern_empty.finditer(string),
-    ):
-        arg = args[arg_index]
-        fmt = arg_match.groupdict()["fmt"] or ""
-        try:
-            string = ph_pattern_empty.sub(f"{{:{fmt}}}".format(arg), string, count=1)
-
-        except ValueError as e:
-            __format_partial_handle_value_error(arg_match, fmt, arg, e)
-
-        args_used_indices.add(arg_index)
-
-    return string
+    return new_sep.join(subgroups)
 
 
-class FormatError(ValueError):
-    pass
+def __case_dispatch_old_sep(
+    args: tuple[_Union[Case, Sep], ...], kwargs: dict[str, _Union[Case, Sep]]
+) -> _Union[str, None]:
+    if len(args) + len(kwargs) != 1:
+        raise ValueError(
+            f"{__name_of_caller(nest_lvl=1)} expects 1 argument, got {len(args) + len(kwargs)}"
+        )
+
+    if "old_sep" in kwargs:
+        old_sep = kwargs["old_sep"]
+
+    elif "old_case" in kwargs:
+        old_case: _Optional[_Union[Case, str]] = kwargs["old_case"]
+        if not isinstance(old_case, str):
+            raise ValueError(
+                f"{__name_of_caller(nest_lvl=1)} expected `str`, got `{type(old_case)}`"
+            )
+
+        if old_case not in _SEP_MAPPING:
+            raise ValueError(
+                f"{__name_of_caller(nest_lvl=1)} expects `old_case` to be in {list(_SEP_MAPPING.keys())}, "
+                f"got `{old_case}`"
+            )
+
+        old_sep = _SEP_MAPPING[old_case]
+
+    else:
+        old_arg_or_sep = args[0]
+        if old_arg_or_sep is None:
+            old_sep = None
+        else:
+            old_sep = _SEP_MAPPING.get(old_arg_or_sep, old_arg_or_sep)
+
+    return old_sep
+
+
+@_overload
+def snake_case(string: str, /, new_case: Case, *, capitalize_first: bool = False) -> str:
+    ...
+
+
+@_overload
+def snake_case(string: str, /, new_sep: Sep, *, capitalize_first: bool = False) -> str:
+    ...
+
+
+def snake_case(
+    string: str,
+    /,
+    *args: _Union[Case, Sep],
+    capitalize_first: bool = False,
+    **kwargs: _Union[Case, Sep],
+) -> str:
+    old_sep = __case_dispatch_old_sep(args, kwargs)
+    return converted_case(string, old_sep=old_sep, new_sep="_", capitalize_first=capitalize_first)
+
+
+@_overload
+def camel_case(string: str, /, new_case: Case, *, capitalize_first: bool = False) -> str:
+    ...
+
+
+@_overload
+def camel_case(string: str, /, new_sep: Sep, *, capitalize_first: bool = False) -> str:
+    ...
+
+
+def camel_case(
+    string: str,
+    /,
+    *args: _Union[Case, Sep],
+    capitalize_first: bool = False,
+    **kwargs: _Union[Case, Sep],
+) -> str:
+    old_sep = __case_dispatch_old_sep(args, kwargs)
+    return converted_case(string, old_sep=old_sep, new_sep=None, capitalize_first=capitalize_first)
+
+
+@_overload
+def kebab_case(string: str, /, new_case: Case, *, capitalize_first: bool = False) -> str:
+    ...
+
+
+@_overload
+def kebab_case(string: str, /, new_sep: Sep, *, capitalize_first: bool = False) -> str:
+    ...
+
+
+def kebab_case(
+    string: str,
+    /,
+    *args: _Union[Case, Sep],
+    capitalize_first: bool = False,
+    **kwargs: _Union[Case, Sep],
+) -> str:
+    old_sep = __case_dispatch_old_sep(args, kwargs)
+    return converted_case(string, old_sep=old_sep, new_sep="-", capitalize_first=capitalize_first)
