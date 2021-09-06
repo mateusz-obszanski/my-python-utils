@@ -11,10 +11,3 @@ def ordinal(n: int) -> str:
     else:
         suffix = "th"
     return f"{n}{suffix}"
-
-
-def pprint_int(n: int, sep="_") -> str:
-    if n < 10_000:
-        return str(n)
-    n_str = str(n)
-    return sep.join(n_str[i : i + 3] for i in range(-1, 0, 3))

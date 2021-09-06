@@ -3,6 +3,8 @@ from typing import (
     Union as _Union,
     Optional as _Optional,
     Literal as _Literal,
+    Callable as _Callable,
+    Mapping as _Mapping,
     overload as _overload,
 )
 import re as _re
