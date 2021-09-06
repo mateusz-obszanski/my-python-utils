@@ -1,12 +1,4 @@
-from format import stringified_kwargs, replace_many, converted_case, Case
-
-
-def test_stringify_kwargs():
-    assert stringified_kwargs(dict(foo="1", bar="2")) == "foo=1, bar=2"
-
-
-def test_replace_many():
-    assert replace_many("foo fo", dict(fo="ba", foo="bar")) == "bar ba"
+from text.transform.case_conversion import converted_case, Case
 
 
 class TestConvertedCase:

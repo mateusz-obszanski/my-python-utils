@@ -1,4 +1,4 @@
-from format.numeric import ordinal
+from text.numeric import ordinal
 
 
 def test_ordinal():
