@@ -120,3 +120,7 @@ class RangeBound(NumericBound, UnionBound):
 
 def check_annotation_bound(x, /, bound: AnnotationBound) -> bool:
     return bound.__check_annotation_bound__(x)
+
+
+Natural = _Annotated[int, MinStrongBound(0)]
+Normalized = _Annotated[float, RangeBound(-1, 1)]
