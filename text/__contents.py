@@ -1,4 +1,4 @@
-from .__utils import Trie as _Trie, suffix_array as _suffix_array
+from ._utils import Trie as _Trie, suffix_array as _suffix_array
 from typing import (
     Union as _Union,
     Optional as _Optional,

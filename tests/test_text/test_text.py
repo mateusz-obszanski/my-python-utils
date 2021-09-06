@@ -1,8 +1,9 @@
-from text import longest_common_substring, _suffix_array
+from text import longest_common_substring
+from text._utils import suffix_array
 import itertools
 
 
-class TestMixin:
+class HelperTestMixin:
     """
     author: Anonta (https://stackoverflow.com/users/5798361/anonta)
     source: https://stackoverflow.com/questions/51456472/python-fastest-algorithm-to-get-the-most-common-prefix-out-of-a-list-of-strings/51457611
@@ -10,7 +11,7 @@ class TestMixin:
 
     def suffix_verify(self, text, step=16):
         tx = text
-        sa, _, lcp = _suffix_array(text=tx, _step=step)
+        sa, _, lcp = suffix_array(text=tx, _step=step)
         assert set(sa) == set(range(len(tx)))
         ok = True
         for i0, i1, h in zip(sa[:-1], sa[1:], lcp[1:]):
@@ -22,7 +23,7 @@ class TestMixin:
         assert ok == True
 
 
-class SuffixArrayTest(TestMixin):
+class TestSuffixArray(HelperTestMixin):
     """
     author: Anonta (https://stackoverflow.com/users/5798361/anonta)
     source: https://stackoverflow.com/questions/51456472/python-fastest-algorithm-to-get-the-most-common-prefix-out-of-a-list-of-strings/51457611
@@ -31,17 +32,17 @@ class SuffixArrayTest(TestMixin):
     def test_16(self):
         # 'a' < 'ana' < 'anana' < 'banana' < 'na' < 'nana'
         expect = ([5, 3, 1, 0, 4, 2], [3, 2, 5, 1, 4, 0], [0, 1, 3, 0, 0, 2])
-        assert _suffix_array(text="banana", _step=16) == expect
+        assert suffix_array(text="banana", _step=16) == expect
 
     def test_1(self):
         expect = ([5, 3, 1, 0, 4, 2], [3, 2, 5, 1, 4, 0], [0, 1, 3, 0, 0, 2])
-        assert _suffix_array(text="banana", _step=1) == expect
+        assert suffix_array(text="banana", _step=1) == expect
 
     def test_mini(self):
-        assert _suffix_array(text="", _step=1) == ([], [], [])
-        assert _suffix_array(text="a", _step=1) == ([0], [0], [0])
-        assert _suffix_array(text="aa", _step=1) == ([1, 0], [1, 0], [0, 1])
-        assert _suffix_array(text="aaa", _step=1) == ([2, 1, 0], [2, 1, 0], [0, 1, 2])
+        assert suffix_array(text="", _step=1) == ([], [], [])
+        assert suffix_array(text="a", _step=1) == ([0], [0], [0])
+        assert suffix_array(text="aa", _step=1) == ([1, 0], [1, 0], [0, 1])
+        assert suffix_array(text="aaa", _step=1) == ([2, 1, 0], [2, 1, 0], [0, 1, 2])
 
     def test_example(self):
         self.suffix_verify("abracadabra")
