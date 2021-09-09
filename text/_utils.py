@@ -22,8 +22,8 @@ class Trie:
     >>> min_length_of_prefix = 6
     >>> trie = Trie()
     >>> for s in strings:
-    >>> trie.insert(s)
-    >>> prefixes = trie.getPrefixes(min_length_of_prefix)
+    >>>     trie.insert(s)
+    >>> prefixes = trie.getPrefixesByOccyrences(min_length_of_prefix)
     >>> print(prefixes)
     [('not_a_file_', 2), ('not_a_file', 2), ('not_a_fil', 2), ('not_a_fi', 2), ('not_a_f', 2), ('not_a_', 2), ('not_a_file_2', 1), ('not_a_file_1', 1), ('file_3', 1), ('file_2', 1), ('file_1', 1)]
 
